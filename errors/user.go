@@ -4,7 +4,7 @@ type UserAlreadyExist struct {
 }
 
 func (m *UserAlreadyExist) Error() string {
-	return "User already exist "
+	return "User already exist"
 }
 
 var (

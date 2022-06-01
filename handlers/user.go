@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/kuronosu/go-rest-ws/common/validations"
 	"github.com/kuronosu/go-rest-ws/errors"
 	"github.com/kuronosu/go-rest-ws/models"
 	"github.com/kuronosu/go-rest-ws/repository"
 	"github.com/kuronosu/go-rest-ws/server"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type ErrorResponse struct {
@@ -24,23 +26,39 @@ type SignUpResponse struct {
 	Email string `json:"email"`
 }
 
+func ResponseError(w http.ResponseWriter, err error, statusCode int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(ErrorResponse{Message: err.Error()})
+}
+
 func SignUpHandler(s server.Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		var requestData SignUpRequest
-		err := json.NewDecoder(r.Body).Decode(&requestData)
+		validationResult, err := validations.ValidateSignupBody(r.Body)
 		if err != nil {
-			w.Header().Set("X-Content-Type-Options", "nosniff")
+			ResponseError(w, err, http.StatusBadRequest)
+			return
+		}
+
+		if !validationResult.IsOk() {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(ErrorResponse{
-				Message: "Invalida data",
-			})
+			json.NewEncoder(w).Encode(validationResult)
+			return
+		}
+
+		email := validationResult.Email()
+		password := validationResult.Password()
+
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			ResponseError(w, err, http.StatusInternalServerError)
 			return
 		}
 
 		user := models.User{
-			Email:    requestData.Email,
-			Password: requestData.Password,
+			Email:    email,
+			Password: string(hashedPassword),
 		}
 		err = repository.InsertUser(r.Context(), &user)
 		if err != nil {
@@ -49,8 +67,7 @@ func SignUpHandler(s server.Server) http.HandlerFunc {
 				json.NewEncoder(w).Encode(ErrorResponse{Message: err.Error()})
 				return
 			}
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(ErrorResponse{Message: err.Error()})
+			ResponseError(w, err, http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
